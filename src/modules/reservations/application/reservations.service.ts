@@ -1,9 +1,11 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomInt, randomUUID } from 'crypto';
+import { loadEnv } from '../../../shared/config/env';
 import {
   ConflictException,
   EntityNotFoundException,
 } from '../../../shared/domain/exceptions/domain.exception';
+import { isEpaycoConfirmationValid } from '../../../shared/infrastructure/adapters/epayco-signature.util';
 import { MESSAGING, MessagingPort } from '../../../shared/domain/ports/messaging.port';
 import {
   PAYMENT_GATEWAY,
@@ -31,8 +33,23 @@ import {
 import { CreateReservationDto } from './dto/create-reservation.dto';
 import { QuoteDto } from './dto/quote.dto';
 
+/** Datos normalizados de una confirmación (webhook) de ePayco. */
+export interface EpaycoConfirmationPayload {
+  /** Número de factura enviado al checkout (= id de la reserva). */
+  invoice: string;
+  refPayco: string;
+  transactionId: string;
+  amount: string;
+  currency: string;
+  /** x_cod_response: 1 aceptada, 2 rechazada, 3 pendiente, 4 fallida. */
+  codResponse: string;
+  signature: string;
+}
+
 @Injectable()
 export class ReservationsService {
+  private readonly logger = new Logger(ReservationsService.name);
+
   constructor(
     @Inject(RESERVATION_REPOSITORY) private readonly repo: ReservationRepository,
     private readonly courts: CourtsService,
@@ -91,7 +108,72 @@ export class ReservationsService {
       userDocument: dto.documentNumber ?? null,
     });
 
-    return this.repo.create(reservation);
+    const saved = await this.repo.create(reservation);
+    await this.sendReservationConfirmation(saved, court.venueName ?? court.location);
+    return saved;
+  }
+
+  /**
+   * Envía por WhatsApp la confirmación de la reserva recién creada (plantilla
+   * `reserva`). Nunca interrumpe la creación: si el envío falla, se registra y
+   * la reserva queda igualmente guardada.
+   */
+  private async sendReservationConfirmation(
+    reservation: Reservation,
+    lugar?: string | null,
+  ): Promise<void> {
+    if (!reservation.userPhone) return;
+    try {
+      await this.messaging.send({
+        to: reservation.userPhone,
+        channel: 'whatsapp',
+        template: 'reservation_confirmed',
+        variables: {
+          nombre: reservation.userName ?? 'Cliente',
+          reserva_no: this.reservationNumber(reservation.id),
+          fecha: this.formatDate(reservation.startTime),
+          hora: `${this.formatTime(reservation.startTime)} - ${this.formatTime(reservation.endTime)}`,
+          lugar: lugar?.trim() || 'Comfasucre',
+          cancha: reservation.courtName ?? '',
+          valor: this.formatCurrency(reservation.totalAmount),
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo enviar la confirmación de la reserva ${reservation.id}: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /** Número de reserva legible derivado del id. */
+  private reservationNumber(id: string): string {
+    return `RSV-${id.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+  }
+
+  private formatDate(date: Date): string {
+    return new Intl.DateTimeFormat('es-CO', {
+      timeZone: 'America/Bogota',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(date);
+  }
+
+  private formatTime(date: Date): string {
+    return new Intl.DateTimeFormat('es-CO', {
+      timeZone: 'America/Bogota',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date);
+  }
+
+  private formatCurrency(amount: number): string {
+    return new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 0,
+    }).format(amount);
   }
 
   async updateStatus(id: string, status: string): Promise<Reservation> {
@@ -160,6 +242,60 @@ export class ReservationsService {
     reservation.paymentReference = intent.reference;
     await this.repo.update(reservation);
     return { reference: intent.reference, checkoutUrl: intent.checkoutUrl, status: intent.status };
+  }
+
+  /**
+   * Procesa la confirmación (webhook) de ePayco: valida la firma `x_signature`,
+   * ubica la reserva por el número de factura (= id de la reserva) y actualiza su
+   * estado de pago. Idempotente: si ya estaba pagada, no vuelve a procesar.
+   */
+  async confirmEpaycoPayment(payload: EpaycoConfirmationPayload): Promise<{
+    ok: boolean;
+    status: string;
+  }> {
+    const epayco = loadEnv().epayco;
+    const input = {
+      refPayco: payload.refPayco,
+      transactionId: payload.transactionId,
+      amount: payload.amount,
+      currency: payload.currency || 'COP',
+    };
+    if (!isEpaycoConfirmationValid(epayco, payload.signature, input)) {
+      this.logger.warn(
+        `Confirmación ePayco con firma inválida para factura ${payload.invoice} (ref ${payload.refPayco}).`,
+      );
+      return { ok: false, status: 'invalid_signature' };
+    }
+
+    const reservation = await this.repo.findById(payload.invoice);
+    if (!reservation) {
+      this.logger.warn(
+        `Confirmación ePayco para una factura inexistente: ${payload.invoice}.`,
+      );
+      return { ok: false, status: 'not_found' };
+    }
+
+    if (reservation.paymentStatus === PaymentStatus.PAID) {
+      return { ok: true, status: 'already_paid' };
+    }
+
+    const reference = payload.refPayco || payload.transactionId || null;
+    const cod = Number(payload.codResponse);
+    if (cod === 1) {
+      reservation.markPaid('epayco', reference);
+      await this.repo.update(reservation);
+      this.logger.log(
+        `Reserva ${reservation.id} marcada como PAGADA por ePayco (ref ${reference}).`,
+      );
+      return { ok: true, status: 'paid' };
+    }
+
+    // 3 = pendiente; cualquier otro (2 rechazada, 4 fallida...) queda sin pagar.
+    reservation.paymentReference = reference;
+    reservation.paymentStatus =
+      cod === 3 ? PaymentStatus.PENDING : PaymentStatus.UNPAID;
+    await this.repo.update(reservation);
+    return { ok: true, status: cod === 3 ? 'pending' : 'rejected' };
   }
 
   async delete(id: string): Promise<void> {

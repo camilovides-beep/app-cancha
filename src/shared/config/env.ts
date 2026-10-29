@@ -30,6 +30,44 @@ export interface AppEnv {
     messaging: string;
     documentLookup: string;
   };
+  epayco: {
+    /** URL pública del checkout (integración personalizada p_*). */
+    checkoutUrl: string;
+    publicKey: string;
+    privateKey: string;
+    merchantId: string;
+    pKey: string;
+    accountId: string;
+    testMode: boolean;
+    /** URL base pública de este backend para los webhooks de confirmación. */
+    confirmationUrl: string;
+    responseUrl: string;
+  };
+  meta: {
+    /** Base de la Graph API de Meta (incluye versión). */
+    graphUrl: string;
+    token: string;
+    phoneNumberId: string;
+    /** Idioma de las plantillas aprobadas en Meta. */
+    templateLanguage: string;
+    /** Nombres de las plantillas aprobadas en el WhatsApp Business. */
+    templates: {
+      verificationCode: string;
+      reservationConfirmed: string;
+      reservationReminder: string;
+    };
+  };
+  whatsapp: {
+    /** Webhook de n8n (campaña WiseCX) que entrega el WhatsApp. */
+    webhookUrl: string;
+    campaignId: string;
+    /** Cabecera Authorization completa (p. ej. "Basic xxxx"). */
+    authorization: string;
+    waitSeconds: number;
+    /** Prefijo de país para celulares de 10 dígitos (vacío = enviar tal cual). */
+    prefijoPais: string;
+    timeoutMs: number;
+  };
 }
 
 const bool = (v: string | undefined, def = false): boolean =>
@@ -66,6 +104,41 @@ export function loadEnv(): AppEnv {
       payment: process.env.PAYMENT_PROVIDER ?? 'stub',
       messaging: process.env.MESSAGING_PROVIDER ?? 'stub',
       documentLookup: process.env.DOCUMENT_LOOKUP_PROVIDER ?? 'stub',
+    },
+    epayco: {
+      // Integración personalizada (p_*). checkout.php responde en secure.payco.co.
+      checkoutUrl:
+        process.env.EPAYCO_CHECKOUT_URL ??
+        'https://secure.payco.co/checkout.php',
+      // Cuenta "Recreación y Deporte" de Comfasucre.
+      publicKey: process.env.EPAYCO_PUBLIC_KEY ?? '',
+      privateKey: process.env.EPAYCO_PRIVATE_KEY ?? '',
+      merchantId: process.env.EPAYCO_P_CUST_ID ?? '',
+      pKey: process.env.EPAYCO_P_KEY ?? '',
+      accountId: process.env.EPAYCO_P_ID_ACCOUNT ?? '',
+      testMode: bool(process.env.EPAYCO_TEST, true),
+      confirmationUrl: process.env.EPAYCO_CONFIRMATION_URL ?? '',
+      responseUrl: process.env.EPAYCO_RESPONSE_URL ?? '',
+    },
+    meta: {
+      graphUrl: process.env.META_GRAPH_URL ?? 'https://graph.facebook.com/v21.0',
+      token: process.env.META_TOKEN ?? '',
+      phoneNumberId: process.env.META_PHONE_NUMBER_ID ?? '',
+      templateLanguage: process.env.META_TEMPLATE_LANGUAGE ?? 'es_MX',
+      templates: {
+        verificationCode: process.env.META_TEMPLATE_CODIGO ?? 'codigo',
+        reservationConfirmed: process.env.META_TEMPLATE_RESERVA ?? 'reserva',
+        reservationReminder:
+          process.env.META_TEMPLATE_RECORDATORIO ?? 'recordatorio_pago',
+      },
+    },
+    whatsapp: {
+      webhookUrl: process.env.WHATSAPP_WEBHOOK_URL ?? '',
+      campaignId: process.env.WHATSAPP_CAMPAIGN_ID ?? '',
+      authorization: process.env.WHATSAPP_AUTHORIZATION ?? '',
+      waitSeconds: parseInt(process.env.WHATSAPP_WAIT_SECONDS ?? '3', 10),
+      prefijoPais: process.env.WHATSAPP_PREFIJO_PAIS ?? '',
+      timeoutMs: parseInt(process.env.WHATSAPP_TIMEOUT_MS ?? '20000', 10),
     },
   };
 }
