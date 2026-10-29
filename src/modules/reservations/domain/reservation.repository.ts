@@ -6,6 +6,8 @@ export interface ReservationListFilters {
   date?: string; // YYYY-MM-DD
   courtId?: string;
   status?: string;
+  /** Estado de pago: unpaid | pending | paid. */
+  paymentStatus?: string;
 }
 
 /** Puerto del repositorio de reservas. */

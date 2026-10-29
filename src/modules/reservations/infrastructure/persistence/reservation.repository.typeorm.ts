@@ -24,6 +24,9 @@ export class TypeOrmReservationRepository implements ReservationRepository {
     const qb = this.repo.createQueryBuilder('r');
     if (filters?.courtId) qb.andWhere('r.court_id = :courtId', { courtId: filters.courtId });
     if (filters?.status) qb.andWhere('r.status = :status', { status: filters.status });
+    if (filters?.paymentStatus) {
+      qb.andWhere('r.payment_status = :paymentStatus', { paymentStatus: filters.paymentStatus });
+    }
     if (filters?.date) {
       qb.andWhere("(r.start_time AT TIME ZONE 'America/Bogota')::date = :date", {
         date: filters.date,

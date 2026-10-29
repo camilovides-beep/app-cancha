@@ -62,6 +62,11 @@ export class ReservationsService {
     return this.repo.findAll(filters);
   }
 
+  /** Lista los pagos hechos y confirmados (reservas con pago en estado 'paid'). */
+  listPayments(): Promise<Reservation[]> {
+    return this.repo.findAll({ paymentStatus: PaymentStatus.PAID });
+  }
+
   async getById(id: string): Promise<Reservation> {
     const reservation = await this.repo.findById(id);
     if (!reservation) throw new EntityNotFoundException('Reserva', id);
@@ -108,21 +113,25 @@ export class ReservationsService {
       userDocument: dto.documentNumber ?? null,
     });
 
-    const saved = await this.repo.create(reservation);
-    await this.sendReservationConfirmation(saved, court.venueName ?? court.location);
-    return saved;
+    // La reserva se crea sin pagar; la confirmación por WhatsApp se envía
+    // cuando el pago queda confirmado (ver confirmEpaycoPayment).
+    return this.repo.create(reservation);
   }
 
   /**
-   * Envía por WhatsApp la confirmación de la reserva recién creada (plantilla
-   * `reserva`). Nunca interrumpe la creación: si el envío falla, se registra y
-   * la reserva queda igualmente guardada.
+   * Envía por WhatsApp la confirmación de la reserva (plantilla `reserva`) una
+   * vez CONFIRMADO el pago. Nunca interrumpe el flujo: si el envío falla, se
+   * registra y la reserva queda igual.
    */
-  private async sendReservationConfirmation(
-    reservation: Reservation,
-    lugar?: string | null,
-  ): Promise<void> {
+  private async sendReservationConfirmation(reservation: Reservation): Promise<void> {
     if (!reservation.userPhone) return;
+    let lugar: string | null = null;
+    try {
+      const court = await this.courts.findById(reservation.courtId);
+      lugar = court.venueName ?? court.location;
+    } catch {
+      /* si no se encuentra la cancha, se usa el nombre por defecto */
+    }
     try {
       await this.messaging.send({
         to: reservation.userPhone,
@@ -287,6 +296,8 @@ export class ReservationsService {
       this.logger.log(
         `Reserva ${reservation.id} marcada como PAGADA por ePayco (ref ${reference}).`,
       );
+      // El mensaje de WhatsApp sale aquí: cuando el pago queda confirmado.
+      await this.sendReservationConfirmation(reservation);
       return { ok: true, status: 'paid' };
     }
 

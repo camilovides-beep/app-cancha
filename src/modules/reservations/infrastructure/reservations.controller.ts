@@ -49,6 +49,13 @@ export class ReservationsController {
     return this.reservations.quote(dto);
   }
 
+  @Get('payments')
+  @ApiOperation({ summary: 'Lista los pagos hechos y confirmados' })
+  async payments() {
+    const list = await this.reservations.listPayments();
+    return list.map(reservationToView);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obtiene una reserva por id' })
   async findOne(@Param('id', ParseUUIDPipe) id: string) {

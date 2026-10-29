@@ -106,12 +106,12 @@ export class N8nWhatsappMessagingAdapter implements MessagingPort {
         return `Comfasucre canchas: tu código de verificación es ${v.code ?? ''}. Vence en 10 minutos. Si no solicitaste esta reserva, ignora este mensaje.`;
       case 'reservation_confirmed':
         return [
-          `¡Hola ${v.nombre ?? ''}! Tu reserva ${v.reserva_no ?? ''} quedó registrada.`,
+          `¡Hola ${v.nombre ?? ''}! Tu pago fue confirmado y tu reserva ${v.reserva_no ?? ''} quedó CONFIRMADA.`,
           `Fecha: ${v.fecha ?? ''}`,
           `Hora: ${v.hora ?? ''}`,
           `Lugar: ${v.lugar ?? ''}`,
           `Cancha: ${v.cancha ?? ''}`,
-          `Valor: ${v.valor ?? ''}`,
+          `Valor pagado: ${v.valor ?? ''}`,
           `Gracias por reservar con Comfasucre.`,
         ].join('\n');
       case 'reservation_reminder':
