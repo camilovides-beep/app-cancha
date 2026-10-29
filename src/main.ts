@@ -1,0 +1,39 @@
+import { ValidationPipe } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { AppModule } from './app.module';
+import { loadEnv } from './shared/config/env';
+import { DomainExceptionFilter } from './shared/infrastructure/http/domain-exception.filter';
+
+async function bootstrap(): Promise<void> {
+  const env = loadEnv();
+  const app = await NestFactory.create(AppModule);
+
+  app.setGlobalPrefix('api');
+  app.enableCors({ origin: env.corsOrigin, credentials: true });
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
+    }),
+  );
+  app.useGlobalFilters(new DomainExceptionFilter());
+
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('API Reservas de Canchas · Comfasucre')
+    .setDescription('API del sistema de reservas (arquitectura hexagonal)')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api/docs', app, document);
+
+  await app.listen(env.port, '0.0.0.0');
+  // eslint-disable-next-line no-console
+  console.log(`🚀 API escuchando en http://localhost:${env.port}/api (docs en /api/docs)`);
+}
+
+void bootstrap();
