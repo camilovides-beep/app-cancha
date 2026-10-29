@@ -58,6 +58,13 @@ export class PublicController {
     return reservationToView(await this.reservations.verify(id, dto.code));
   }
 
+  @Post('reservations/:id/payment')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Inicia el pago de la reserva (checkout de ePayco)' })
+  initPayment(@Param('id', ParseUUIDPipe) id: string) {
+    return this.reservations.initPayment(id);
+  }
+
   @Get('reservations/:id')
   @ApiOperation({ summary: 'Detalle de una reserva (confirmación)' })
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
